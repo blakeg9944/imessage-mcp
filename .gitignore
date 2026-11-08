@@ -1,0 +1,21 @@
+# Private data — never commit (see SPEC.md §7)
+contacts.csv
+logs/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Env / OS
+.env
+.DS_Store
