@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__imessage__preview_send",
+      "mcp__imessage__get_replies",
+      "mcp__imessage__check_replies",
+      "mcp__imessage-demo__preview_send",
+      "mcp__imessage-demo__get_replies",
+      "mcp__imessage-demo__check_replies"
+    ],
+    "ask": [
+      "mcp__imessage__confirm_send",
+      "mcp__imessage-demo__confirm_send"
+    ]
+  }
+}

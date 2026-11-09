@@ -210,8 +210,9 @@ def preview_send(
     result["confirm_token"] = batch.token
     result["expires_at"] = (now + timedelta(seconds=store.ttl)).isoformat(timespec="seconds")
     result["next_step"] = (
-        "Show Blake this full preview table in chat. Only if Blake approves, call confirm_send with this token "
-        "and the exact same messages list. A native macOS dialog will then ask Blake to click Send."
+        "Show Blake this full preview table in chat, then call confirm_send right away with this token and the "
+        "exact same messages list (no need to wait for a chat reply unless Blake asked to review first). Blake "
+        "approves at the permission prompt, then a native macOS dialog asks Blake to click Send."
         + (" DRY RUN: nothing will actually be sent." if cfg.dry_run else "")
     )
     return result

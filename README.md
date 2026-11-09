@@ -18,6 +18,10 @@ Don't use the live server in any mode that approves tool calls automatically (`-
 bypass-permissions, auto-accept or auto mode), or in a session where Claude has been given control of the
 screen (computer use). Live sends belong in a session with normal permission prompts and no screen control.
 
+The project's [.claude/settings.json](.claude/settings.json) allow-lists only the three tools that can't
+send (`preview_send`, `get_replies`, `check_replies`) and puts `confirm_send` on the **ask** list, so it always
+prompts. Keep it that way.
+
 There are two gates, and both must stay:
 
 1. **The native macOS dialog** is the real gate. It lists every message with **Cancel** (the default) and
@@ -131,9 +135,11 @@ pointed at `contacts.example.csv` or a `chat.db` under `demo/`.
 
 ## How a send works
 
-1. Claude drafts texts and calls `preview_send`. It must show you the full preview table.
-2. You approve in chat. Claude calls `confirm_send` with the token and the same messages. Claude Code asks
-   permission: check the names and texts, then answer **Yes** (once).
+1. Claude drafts texts and calls `preview_send` (no prompt: it can't send). It shows you the full preview
+   table.
+2. Claude calls `confirm_send` right away with the token and the same messages. It doesn't wait for a chat
+   "yes" unless you asked to review first. Claude Code asks permission: check the names and texts, then
+   answer **Yes** (once), or **No** and ask for changes.
 3. The macOS dialog lists every row, with `DRY RUN`, `REPEAT of a message sent …` or `QUIET HOURS` in caps
    when they apply. Click **Send** only if it's right.
 4. For each row the server records `MAX(message.ROWID)`, sends with `osascript` (the phone and text are passed
@@ -142,6 +148,18 @@ pointed at `contacts.example.csv` or a `chat.db` under `demo/`.
 5. Every row is appended to `logs/sends.jsonl` (gitignored). A live row is written as `pending` just before
    the send and again with the result, so a text that went out is always in the log and the duplicate guard
    sees it even if the delivery check fails. That log is the record of who was asked what, and when.
+
+### Quick send: `/text`
+
+```
+/text Liz "Running 5 min late"
+```
+
+Looks the name up in `contacts.csv` (a first name is fine if only one row matches), sends the words exactly
+as written, and goes straight from the preview to `confirm_send`. You still get the permission prompt and the
+Send dialog. It stops instead of guessing if the name doesn't match exactly one contact, and it never
+overrides quiet hours or the repeat guard unless you say so. The command is in
+[.claude/commands/text.md](.claude/commands/text.md).
 
 A failed iMessage is **not** resent as SMS automatically, because that risks a double text. Claude can offer a
 new `preview_send` with `service="SMS"` (that needs iPhone Text Message Forwarding).
