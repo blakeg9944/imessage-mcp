@@ -27,3 +27,14 @@ def ward() -> dict:
 @pytest.fixture
 def allow() -> contacts.Allowlist:
     return contacts.load(ROOT / "contacts.example.csv")
+
+
+@pytest.fixture(autouse=True)
+def no_real_subprocess(monkeypatch):
+    """Any real osascript call (send or dialog) fails the test. Tests pass a fake runner instead."""
+    import subprocess
+
+    def refuse(*args, **kwargs):
+        raise AssertionError(f"real subprocess.run called in a test: {args!r}")
+
+    monkeypatch.setattr(subprocess, "run", refuse)

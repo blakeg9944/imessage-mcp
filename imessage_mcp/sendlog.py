@@ -2,7 +2,7 @@
 
 The log is the source of truth for "who was asked what, and when." Each record holds `send_id`,
 `timestamp` (local ISO-8601, taken just before the send), `name`, normalized `phone`, `text`, `service`,
-`dry_run`, `sent` (whether the Messages send was actually called and returned cleanly), the chat.db `guid`
+`dry_run`, `attempted` (the Messages send was called), `sent` (it returned cleanly), the chat.db `guid`
 when found, delivery `status`, `error`, and `after_rowid` (the pre-send MAX(ROWID), so the sent row can be
 found again later).
 """
@@ -65,8 +65,12 @@ class SendLog:
         return None
 
     def live_sends(self, phone: str) -> list[dict]:
-        """Live rows to `phone` where the Messages send was actually called, oldest first."""
-        rows = [r for r in self.records() if r.get("phone") == phone and not r.get("dry_run") and r.get("sent")]
+        """Live rows to `phone` where the Messages send was called, oldest first."""
+        rows = [
+            r
+            for r in self.records()
+            if r.get("phone") == phone and not r.get("dry_run") and (r.get("sent") or r.get("attempted"))
+        ]
         return sorted(rows, key=_ts)
 
     def last_live_send_time(self, phone: str) -> datetime | None:
