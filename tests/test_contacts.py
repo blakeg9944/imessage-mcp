@@ -71,4 +71,4 @@ def test_bad_header(tmp_path):
 def test_example_file_is_clean():
     allow = contacts.load(ROOT / "contacts.example.csv")
     assert allow.problems == []
-    assert len(allow) == 5
+    assert len(allow) == 8

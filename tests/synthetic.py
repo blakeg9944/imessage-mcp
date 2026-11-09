@@ -3,6 +3,10 @@
 Used for development, tests, and the on-screen demo, so no real messages are ever needed
 outside the user's own Mac. The data mixes planted "findable" storylines (a wifi password,
 a restaurant recommendation, a goat incident...) with lots of realistic filler chatter.
+
+Copied from ~/imessage-search-project and extended for imessage-mcp with ward interview threads
+(`_ward_threads`, SPEC §11) and the delivery columns (`error`, `is_sent`, `is_delivered`). Run
+`python -m tests.synthetic OUT_DIR` to write a demo chat.db plus a matching demo send log.
 """
 
 from __future__ import annotations
@@ -182,7 +186,9 @@ def _create_chat_db(path: Path) -> sqlite3.Connection:
             attributedBody BLOB, handle_id INTEGER DEFAULT 0, service TEXT, date INTEGER, date_read INTEGER,
             is_from_me INTEGER DEFAULT 0, cache_has_attachments INTEGER DEFAULT 0, item_type INTEGER DEFAULT 0,
             associated_message_guid TEXT, associated_message_type INTEGER DEFAULT 0,
-            thread_originator_guid TEXT, balloon_bundle_id TEXT);
+            thread_originator_guid TEXT, balloon_bundle_id TEXT, error INTEGER DEFAULT 0,
+            is_sent INTEGER DEFAULT 0, is_delivered INTEGER DEFAULT 0, date_delivered INTEGER DEFAULT 0,
+            associated_message_emoji TEXT);
         CREATE TABLE chat_handle_join (chat_id INTEGER, handle_id INTEGER, UNIQUE(chat_id, handle_id));
         CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER, message_date INTEGER DEFAULT 0,
             PRIMARY KEY (chat_id, message_id));
@@ -335,6 +341,166 @@ def _filler_lines(rng: random.Random, chat: str) -> list[tuple[str, str]]:
     return lines
 
 
+# ---------------------------------------------------------------------------------------------------
+# Ward interview threads (added for imessage-mcp, SPEC §11). Every name and number here is fake; the
+# numbers are in the 555-01xx range reserved for fiction. contacts.example.csv lists the same people.
+
+INVITE = "Could you meet with the bishopric Sunday at 7:00?"
+REMINDER = "Reminder: Sunday at 7:00 with the bishopric. See you then!"
+WARD_SEND_AT = datetime(2026, 11, 5, 18, 30, tzinfo=TZ)
+WARD_SECOND_SEND_AT = datetime(2026, 11, 6, 12, 0, tzinfo=TZ)
+
+
+@dataclass(frozen=True)
+class WardMember:
+    key: str
+    name: str
+    phone: str  # normalized
+    handle_id: str  # how chat.db stores it
+    service: str = "iMessage"
+
+
+WARD = {
+    m.key: m
+    for m in [
+        WardMember("yes", "Mark Nelson", "+18015550131", "+18015550131"),
+        WardMember("no", "Ruth Okafor", "+18015550132", "8015550132"),  # stored as bare digits
+        WardMember("reschedule", "David Tanaka", "+18015550133", "+18015550133", "SMS"),  # SMS-only
+        WardMember("tapback", "Grace Whitfield", "+18015550134", "+18015550134"),
+        WardMember("opt_out", "Paul Ferreira", "+18015550135", "+18015550135"),
+        WardMember("no_reply", "Anna Lindqvist", "+18015550136", "+18015550136"),
+        WardMember("household", "Smith household", "+18015550137", "+18015550137"),
+        WardMember("failed", "Lucy Abara", "+18015550138", "+18015550138"),
+    ]
+}
+
+# member key -> [(minutes after WARD_SEND_AT, text)]
+WARD_REPLIES = {
+    "yes": [(12, "Yes, that works!")],
+    "no": [(40, "No sorry, we'll be out of town this weekend")],
+    "reschedule": [(5, "can we do 7:30 instead?")],
+    "opt_out": [(90, "please stop texting me")],
+    "household": [(25, "This is Jane, John and I can both come")],
+}
+
+
+def _ward_threads(w: _Writer) -> None:
+    con = w.con
+    sent_guids: dict[str, str] = {}
+    ward_handles: dict[str, int] = {}
+    for m in WARD.values():
+        cur = con.execute(
+            "INSERT INTO handle (id, service, uncanonicalized_id) VALUES (?, ?, ?)", (m.handle_id, m.service, None)
+        )
+        ward_handles[m.key] = cur.lastrowid
+        chat = con.execute(
+            "INSERT INTO chat (guid, style, chat_identifier, service_name, display_name) VALUES (?, 45, ?, ?, '')",
+            (f"{m.service};-;{m.handle_id}", m.handle_id, m.service),
+        )
+        con.execute("INSERT INTO chat_handle_join VALUES (?, ?)", (chat.lastrowid, cur.lastrowid))
+        w.chat_ids[f"ward:{m.key}"] = chat.lastrowid
+
+    def put(key, from_me, text, when, *, error=0, sent=1, delivered=1, assoc=None, text_col=None):
+        m = WARD[key]
+        guid = str(uuid.UUID(int=w.rng.getrandbits(128))).upper()
+        cur = con.execute(
+            "INSERT INTO message (guid, text, attributedBody, handle_id, service, date, is_from_me, error, is_sent,"
+            " is_delivered, date_delivered, associated_message_guid, associated_message_type)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                guid,
+                text_col,
+                attributed_body.encode(text),
+                ward_handles[key],
+                m.service,
+                _apple_ns(when),
+                int(from_me),
+                error,
+                int(from_me and sent),
+                int(from_me and delivered),
+                _apple_ns(when) if from_me and delivered else 0,
+                f"p:0/{assoc[1]}" if assoc else None,
+                assoc[0] if assoc else 0,
+            ),
+        )
+        con.execute(
+            "INSERT INTO chat_message_join VALUES (?, ?, ?)", (w.chat_ids[f"ward:{key}"], cur.lastrowid, _apple_ns(when))
+        )
+        return guid
+
+    # An older, unrelated exchange before the send: must not count as a reply.
+    put("no_reply", True, "Thanks for helping with the move!", WARD_SEND_AT - timedelta(days=9))
+    put("no_reply", False, "Happy to help, anytime", WARD_SEND_AT - timedelta(days=9, minutes=-30), text_col="Happy to help, anytime")
+    put("yes", False, "Do you know when the ward party is?", WARD_SEND_AT - timedelta(days=3))
+
+    for i, key in enumerate(WARD):
+        when = WARD_SEND_AT + timedelta(seconds=i)
+        if key == "failed":
+            # A send that Messages accepted and then failed ("Not Delivered").
+            sent_guids[key] = put(key, True, INVITE, when, error=22, sent=0, delivered=0)
+        elif WARD[key].service == "SMS":
+            sent_guids[key] = put(key, True, INVITE, when, delivered=0)  # SMS: sent, no delivery receipt
+        else:
+            sent_guids[key] = put(key, True, INVITE, when)
+
+    for key, replies in WARD_REPLIES.items():
+        for minutes, text in replies:
+            put(key, False, text, WARD_SEND_AT + timedelta(minutes=minutes), text_col=text if key == "no" else None)
+
+    # 👍 tapback only.
+    put("tapback", False, f"Liked “{INVITE}”", WARD_SEND_AT + timedelta(minutes=3), assoc=(2001, sent_guids["tapback"]))
+    # Loved, then removed the love: cancels out, so still no reply.
+    put("no_reply", False, f"Loved “{INVITE}”", WARD_SEND_AT + timedelta(minutes=8), assoc=(2000, sent_guids["no_reply"]))
+    put("no_reply", False, f"Removed a heart from “{INVITE}”", WARD_SEND_AT + timedelta(minutes=9),
+        assoc=(3000, sent_guids["no_reply"]))
+
+    # A second logged send to Mark, with its own reply: the first send's replies stop here.
+    put("yes", True, REMINDER, WARD_SECOND_SEND_AT)
+    put("yes", False, "See you then", WARD_SECOND_SEND_AT + timedelta(minutes=4))
+
+    # A ward group chat: Mark and Ruth reply there too, which 1:1 reads must ignore.
+    group = con.execute(
+        "INSERT INTO chat (guid, style, chat_identifier, service_name, display_name)"
+        " VALUES ('iMessage;+;chat777', 43, 'chat777', 'iMessage', 'Ward council')"
+    ).lastrowid
+    for key in ("yes", "no"):
+        con.execute("INSERT INTO chat_handle_join VALUES (?, ?)", (group, ward_handles[key]))
+    for key, text, minutes in (("yes", "Yes I'll bring the rolls", 20), ("no", "No problem", 21)):
+        guid = str(uuid.UUID(int=w.rng.getrandbits(128))).upper()
+        when = WARD_SEND_AT + timedelta(minutes=minutes)
+        cur = con.execute(
+            "INSERT INTO message (guid, text, handle_id, service, date, is_from_me) VALUES (?, ?, ?, 'iMessage', ?, 0)",
+            (guid, text, ward_handles[key], _apple_ns(when)),
+        )
+        con.execute("INSERT INTO chat_message_join VALUES (?, ?, ?)", (group, cur.lastrowid, _apple_ns(when)))
+
+    WARD_SENT_GUIDS.clear()
+    WARD_SENT_GUIDS.update(sent_guids)
+
+
+WARD_SENT_GUIDS: dict[str, str] = {}  # filled by generate(): member key -> guid of the INVITE row
+
+
+def ward_sendlog() -> list[dict]:
+    """Send-log records matching the synthetic sends (call after generate())."""
+    records = []
+    for i, (key, m) in enumerate(WARD.items()):
+        status = "failed" if key == "failed" else ("sent" if m.service == "SMS" else "delivered")
+        records.append({
+            "send_id": f"synth-{key}",
+            "timestamp": (WARD_SEND_AT + timedelta(seconds=i)).isoformat(),
+            "name": m.name, "phone": m.phone, "text": INVITE, "service": m.service, "dry_run": False,
+            "sent": True, "guid": WARD_SENT_GUIDS.get(key), "status": status,
+            "error": "chat.db error 22" if key == "failed" else None,
+        })
+    m = WARD["yes"]
+    records.append({
+        "send_id": "synth-yes-reminder", "timestamp": WARD_SECOND_SEND_AT.isoformat(), "name": m.name,
+        "phone": m.phone, "text": REMINDER, "service": "iMessage", "dry_run": False, "sent": True, "guid": None,
+        "status": "delivered", "error": None,
+    })
+    return records
+
 def generate(out_dir: Path, seed: int = 7, sessions_per_chat: int = 45) -> dict[str, Path]:
     """Write `chat.db` and an `AddressBook/` tree into out_dir. Returns their paths."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -367,9 +533,21 @@ def generate(out_dir: Path, seed: int = 7, sessions_per_chat: int = 45) -> dict[
 
     # A group rename event (non-message row that extraction must skip).
     w.message("crew", "jake", None, datetime(2026, 8, 7, 19, 55, tzinfo=TZ), item_type=2)
+    _ward_threads(w)
     con.commit()
     con.close()
 
     ab_root = out_dir / "AddressBook"
     _create_addressbook(ab_root)
     return {"chat_db": chat_db, "addressbook": ab_root}
+
+
+if __name__ == "__main__":
+    import json
+    import sys
+
+    out = Path(sys.argv[1] if len(sys.argv) > 1 else "demo")
+    paths = generate(out)
+    log = out / "sends.jsonl"
+    log.write_text("".join(json.dumps(r) + "\n" for r in ward_sendlog()))
+    print(f"wrote {paths['chat_db']} and {log}")
