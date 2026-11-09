@@ -1,8 +1,9 @@
 """contacts.csv → allowlist (SPEC §7, §10).
 
-`contacts.csv` (`name,phone`) is filled by hand from LCR with only the people being scheduled. It gates
-both sending and reading. Rows whose phone won't normalize are skipped. If two rows normalize to the same
-phone (households often share one in LCR), both are reported and that number is neither sendable nor
+`contacts.csv` (`name,phone`) is filled by hand with only the people Claude may text and read (Blake's own
+contacts; later, for the ward profile, members from LCR). It gates both sending and reading. Rows whose
+phone won't normalize are skipped. If two rows normalize to the same phone (a shared household number),
+both are reported and that number is neither sendable nor
 readable until the file is fixed.
 """
 
@@ -48,7 +49,7 @@ class Allowlist:
             )
         contact = self.by_phone.get(phone)
         if contact is None:
-            raise NotAllowed(f"{phone} is not in contacts.csv (the allowlist). Add it by hand from LCR first.")
+            raise NotAllowed(f"{phone} is not in contacts.csv (the allowlist). Add it by hand first.")
         return contact
 
 

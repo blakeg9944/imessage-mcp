@@ -6,7 +6,8 @@
 | `IMESSAGE_MCP_NO_DIALOG` | unset | `1` skips the native dialog. For pytest; honored only in dry-run. |
 | `IMESSAGE_MCP_CHAT_DB` | `~/Library/Messages/chat.db` | chat.db to read (tests point it at the synthetic DB). |
 | `IMESSAGE_MCP_QUIET_HOURS` | `21:00-08:00` | No sends in this local-time window. |
-| `IMESSAGE_MCP_BLOCK_SUNDAY` | `1` | `1` also blocks sends on Sundays. |
+| `IMESSAGE_MCP_PROFILE` | `personal` | `personal` (Blake's own contacts) or `ward` (later: LCR contacts, ward wording). |
+| `IMESSAGE_MCP_BLOCK_SUNDAY` | `0` (`1` for ward) | `1` also blocks sends on Sundays. |
 | `IMESSAGE_MCP_CONTACTS` | `<project>/contacts.csv` | The allowlist. |
 | `IMESSAGE_MCP_LOG` | `<project>/logs/sends.jsonl` | The send log. |
 """
@@ -30,6 +31,7 @@ class ConfigError(RuntimeError):
 class Config:
     live: bool
     no_dialog: bool
+    profile: str
     chat_db: Path
     contacts: Path
     log_path: Path
@@ -55,6 +57,8 @@ def parse_quiet_hours(value: str) -> tuple[time, time]:
         raise ConfigError(f"IMESSAGE_MCP_QUIET_HOURS must look like 21:00-08:00 (got {value!r})") from None
 
 
+PROFILES = ("personal", "ward")
+
 DEMO_DIR = PROJECT_ROOT / "demo"
 EXAMPLE_CONTACTS_NAME = "contacts.example.csv"
 
@@ -73,7 +77,10 @@ def load(env: Mapping[str, str] | None = None) -> Config:
             "Refusing to start: IMESSAGE_MCP_LIVE=1 and IMESSAGE_MCP_NO_DIALOG=1 are both set. "
             "The native dialog is the send gate and can only be skipped in dry-run."
         )
-    block = env.get("IMESSAGE_MCP_BLOCK_SUNDAY", "1").strip()
+    profile = env.get("IMESSAGE_MCP_PROFILE", "").strip().lower() or "personal"
+    if profile not in PROFILES:
+        raise ConfigError(f"IMESSAGE_MCP_PROFILE must be personal or ward (got {profile!r})")
+    block = env.get("IMESSAGE_MCP_BLOCK_SUNDAY", "1" if profile == "ward" else "0").strip()
     if block not in ("0", "1"):
         raise ConfigError(f"IMESSAGE_MCP_BLOCK_SUNDAY must be 0 or 1 (got {block!r})")
     start, end = parse_quiet_hours(env.get("IMESSAGE_MCP_QUIET_HOURS", "21:00-08:00"))
@@ -88,6 +95,7 @@ def load(env: Mapping[str, str] | None = None) -> Config:
     return Config(
         live=live,
         no_dialog=no_dialog,
+        profile=profile,
         chat_db=chat_db,
         contacts=contacts,
         log_path=Path(env.get("IMESSAGE_MCP_LOG") or PROJECT_ROOT / "logs" / "sends.jsonl").expanduser(),

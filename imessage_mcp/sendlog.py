@@ -5,6 +5,10 @@ The log is the source of truth for "who was asked what, and when." Each record h
 `dry_run`, `attempted` (the Messages send was called), `sent` (it returned cleanly), the chat.db `guid`
 when found, delivery `status`, `error`, and `after_rowid` (the pre-send MAX(ROWID), so the sent row can be
 found again later).
+
+A live row is logged twice: a `pending` record (attempted) before osascript runs, so the duplicate guard
+sees the send even if anything after it fails, then the final record. Readers keep the last line per
+`send_id`.
 """
 
 from __future__ import annotations
@@ -44,6 +48,22 @@ class SendLog:
             os.fsync(f.fileno())
 
     def records(self) -> list[dict]:
+        """One record per send_id: the last line written for it (a live send logs `pending`, then the result)."""
+        latest: dict[str, dict] = {}
+        out: list[dict] = []
+        for r in self.raw_records():
+            key = r.get("send_id")
+            if key is None:
+                out.append(r)
+            elif key in latest:
+                latest[key].clear()
+                latest[key].update(r)
+            else:
+                latest[key] = dict(r)
+                out.append(latest[key])
+        return out
+
+    def raw_records(self) -> list[dict]:
         if not self.path.exists():
             return []
         out = []

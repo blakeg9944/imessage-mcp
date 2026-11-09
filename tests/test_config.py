@@ -12,7 +12,15 @@ def test_defaults_are_dry_run():
     assert str(cfg.chat_db).endswith("Library/Messages/chat.db")
     assert cfg.contacts == config.PROJECT_ROOT / "contacts.csv"
     assert cfg.log_path == config.PROJECT_ROOT / "logs" / "sends.jsonl"
-    assert (cfg.quiet_start, cfg.quiet_end, cfg.block_sunday) == (time(21), time(8), True)
+    assert (cfg.quiet_start, cfg.quiet_end, cfg.block_sunday) == (time(21), time(8), False)
+    assert cfg.profile == "personal"
+
+
+def test_ward_profile_blocks_sunday_by_default():
+    cfg = config.load({"IMESSAGE_MCP_PROFILE": "Ward"})
+    assert cfg.profile == "ward" and cfg.block_sunday
+    assert not config.load({"IMESSAGE_MCP_PROFILE": "ward", "IMESSAGE_MCP_BLOCK_SUNDAY": "0"}).block_sunday
+    assert config.load({"IMESSAGE_MCP_BLOCK_SUNDAY": "1"}).block_sunday
 
 
 @pytest.mark.parametrize("value", ["", "0", "true", "yes", "TRUE", " 2 "])
@@ -59,7 +67,8 @@ def test_overrides(tmp_path):
     assert (cfg.quiet_start, cfg.quiet_end, cfg.block_sunday) == (time(22, 30), time(7, 15), False)
 
 
-@pytest.mark.parametrize("env", [{"IMESSAGE_MCP_QUIET_HOURS": "9pm-8am"}, {"IMESSAGE_MCP_BLOCK_SUNDAY": "no"}])
+@pytest.mark.parametrize("env", [{"IMESSAGE_MCP_QUIET_HOURS": "9pm-8am"}, {"IMESSAGE_MCP_BLOCK_SUNDAY": "no"},
+                                 {"IMESSAGE_MCP_PROFILE": "church"}])
 def test_bad_values(env):
     with pytest.raises(ConfigError):
         config.load(env)

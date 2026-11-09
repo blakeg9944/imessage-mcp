@@ -2,7 +2,8 @@
 
 `osascript` shows `display dialog` with Cancel (the default) and Send, giving up after 120 seconds. The
 dialog text is passed as an argument (`on run argv`), never pasted into the script. Claude can't click
-it, so a confirm token alone can never send. A timeout, Cancel, or any error counts as Cancel.
+it unless it has been given control of the screen (computer use), so a confirm token alone can never send
+from a session without screen control. A timeout, Cancel, or any error counts as Cancel.
 """
 
 from __future__ import annotations

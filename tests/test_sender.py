@@ -1,9 +1,11 @@
+import sqlite3
 import subprocess
+import threading
 from datetime import datetime, timedelta
 
 import pytest
 
-from imessage_mcp import config, dialog, sender
+from imessage_mcp import chatdb, config, contacts, dialog, sender
 from imessage_mcp.confirm import TokenStore, preview_send
 from imessage_mcp.sendlog import SendLog
 from tests.fakes import FakeClock, FakeOsascript, writable_copy
@@ -31,9 +33,9 @@ def preview(ctx, msgs, **kw):
     return r["confirm_token"]
 
 
-def confirm(ctx, tok, msgs, runner, now=NOON_THU):
+def confirm(ctx, tok, msgs, runner, now=NOON_THU, allow=None):
     return sender.confirm_send(tok, msgs, cfg=ctx["cfg"], store=ctx["store"], log=ctx["log"], runner=runner,
-                               now=lambda: now, clock=ctx["clock"], sleep=ctx["clock"].sleep)
+                               allow=allow, now=lambda: now, clock=ctx["clock"], sleep=ctx["clock"].sleep)
 
 
 MSGS = [{"phone": "8015550131", "text": TEXT}, {"phone": "8015550134", "text": TEXT}]
@@ -225,3 +227,144 @@ def test_osascript_timeout_counts_as_attempted(live):
     r = confirm(live, preview(live, msgs), msgs, Hang(live["cfg"].chat_db))
     assert r["results"][0]["status"] == "unknown"
     assert live["log"].live_sends("+18015550131")  # so the duplicate guard still sees it
+
+
+def test_ok_is_false_when_a_row_is_unknown(live):
+    msgs = MSGS[:1]
+    r = confirm(live, preview(live, msgs), msgs, FakeOsascript(live["cfg"].chat_db, row=None))
+    assert r["results"][0]["status"] == "unknown" and r["ok"] is False
+    assert "1 unknown" in r["summary"] and "Do not retry" in r["summary"]
+
+
+# --- review H1: a sent text is always logged --------------------------------------------------------
+
+
+def test_pending_record_is_written_before_the_send(live):
+    msgs = MSGS[:1]
+    seen = {}
+
+    class Peek(FakeOsascript):
+        def __call__(self, argv, **kw):
+            if self._kind(argv) == "send":
+                seen["log"] = live["log"].records()
+            return super().__call__(argv, **kw)
+
+    confirm(live, preview(live, msgs), msgs, Peek(live["cfg"].chat_db, row={}))
+    assert [(x["status"], x["attempted"]) for x in seen["log"]] == [("pending", True)]
+    assert [x["status"] for x in live["log"].raw_records()] == ["pending", "delivered"]
+    assert [x["status"] for x in live["log"].records()] == ["delivered"]  # readers keep the last line
+
+
+def test_locked_chat_db_after_send_is_still_logged_and_guarded(live, monkeypatch):
+    msgs = MSGS[:1]
+
+    def locked(*a, **kw):
+        raise sqlite3.OperationalError("database is locked")
+
+    fake = FakeOsascript(live["cfg"].chat_db, row={})
+    tok = preview(live, msgs)
+    monkeypatch.setattr(chatdb, "find_sent_row", locked)
+    r = confirm(live, tok, msgs, fake)
+    assert len(fake.sends()) == 1
+    res = r["results"][0]
+    assert res["status"] == "unknown" and res["sent"] is True and "locked" in res["error"]
+    assert live["log"].records()[0]["status"] == "unknown"
+    again = preview_send(msgs, cfg=live["cfg"], allow=live["allow"], log=live["log"], store=live["store"],
+                         now=NOON_THU + timedelta(minutes=2))
+    assert not again["ok"] and "allow_repeat" in again["failed_rows"][0]["reason"]
+
+
+def test_connect_turns_query_errors_into_chatdb_error(synth_db):
+    with pytest.raises(chatdb.ChatDBError, match="no such table"):
+        with chatdb.connect(synth_db) as con:
+            con.execute("SELECT * FROM nope")
+
+
+def test_log_write_failure_before_send_sends_nothing(live, monkeypatch):
+    msgs = MSGS[:1]
+    tok = preview(live, msgs)
+
+    def full(record):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(live["log"], "append", full)
+    fake = FakeOsascript(live["cfg"].chat_db, row={})
+    r = confirm(live, tok, msgs, fake)
+    assert fake.sends() == []
+    assert r["results"][0]["status"] == "failed" and "couldn't write the send log" in r["results"][0]["error"]
+
+
+def test_final_log_failure_keeps_the_pending_record(live, monkeypatch):
+    msgs = MSGS[:1]
+    tok = preview(live, msgs)
+    real = live["log"].append
+    calls = []
+
+    def second_fails(record):
+        calls.append(record["status"])
+        if len(calls) > 1:
+            raise OSError(28, "No space left on device")
+        real(record)
+
+    monkeypatch.setattr(live["log"], "append", second_fails)
+    r = confirm(live, tok, msgs, FakeOsascript(live["cfg"].chat_db, row={}))
+    assert r["results"][0]["status"] == "delivered" and "couldn't write the send log" in r["results"][0]["error"]
+    assert live["log"].live_sends("+18015550131")  # the pending record still blocks a repeat
+
+
+# --- review M1: one confirm_send at a time, guards re-checked after Send ---------------------------
+
+
+def test_second_confirm_while_one_is_running_is_refused(live):
+    msgs = MSGS[:1]
+    tok_a = preview(live, msgs)
+    tok_b = preview(live, [MSGS[1]])
+    opened, release, out = threading.Event(), threading.Event(), {}
+
+    class SlowDialog(FakeOsascript):
+        def __call__(self, argv, **kw):
+            if self._kind(argv) == "dialog":
+                opened.set()
+                release.wait(5)
+            return super().__call__(argv, **kw)
+
+    t = threading.Thread(target=lambda: out.update(a=confirm(live, tok_a, msgs, SlowDialog(live["cfg"].chat_db, row={}))))
+    t.start()
+    assert opened.wait(5)
+    fake_b = FakeOsascript(live["cfg"].chat_db, row={})
+    b = confirm(live, tok_b, [MSGS[1]], fake_b)
+    release.set()
+    t.join(5)
+    assert not b["ok"] and "another confirm_send" in b["error"] and fake_b.calls == []
+    assert out["a"]["results"][0]["status"] == "delivered"
+    assert "already used" in confirm(live, tok_b, [MSGS[1]], fake_b)["error"]  # the refused token is spent
+
+
+def test_guards_rechecked_after_the_dialog(live):
+    msgs = MSGS[:1]
+    tok = preview(live, msgs)
+
+    class SentElsewhere(FakeOsascript):
+        def __call__(self, argv, **kw):
+            if self._kind(argv) == "dialog":  # the same text gets logged while the dialog is open
+                live["log"].append({"send_id": "other", "timestamp": NOON_THU.isoformat(), "name": "Mark Nelson",
+                                    "phone": "+18015550131", "text": TEXT, "service": "iMessage", "dry_run": False,
+                                    "sent": True, "attempted": True, "status": "delivered"})
+            return super().__call__(argv, **kw)
+
+    fake = SentElsewhere(live["cfg"].chat_db, row={})
+    r = confirm(live, tok, msgs, fake)
+    assert not r["ok"] and "after Send was clicked" in r["error"] and fake.sends() == []
+
+
+# --- review L1: contacts.csv re-checked at confirm --------------------------------------------------
+
+
+def test_contact_removed_after_preview_is_not_sent(live, tmp_path):
+    msgs = MSGS[:1]
+    tok = preview(live, msgs)
+    trimmed = tmp_path / "contacts.csv"
+    trimmed.write_text("name,phone\nGrace Whitfield,8015550134\n")
+    fake = FakeOsascript(live["cfg"].chat_db, row={})
+    r = confirm(live, tok, msgs, fake, allow=contacts.load(trimmed))
+    assert not r["ok"] and "can no longer be texted" in r["error"] and fake.calls == []

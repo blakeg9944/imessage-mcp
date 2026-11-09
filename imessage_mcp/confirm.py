@@ -81,6 +81,13 @@ class TokenStore:
         return batch
 
 
+    def spend(self, token: str) -> None:
+        """Mark a token used without checking it (a refused confirm_send still spends its token)."""
+        batch = self._batches.get(str(token))
+        if batch is not None:
+            batch.used = True
+
+
 def parse_service(value: object) -> str:
     key = str(value if value is not None else "auto").strip().lower()
     if key not in SERVICES:

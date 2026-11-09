@@ -1,4 +1,4 @@
-"""check_interview_replies + the keyword guess (SPEC §6, §9).
+"""check_replies + the keyword guess (SPEC §6, §9).
 
 For each logged send: the original text, then every reply from that number after the send and before the
 next logged live send to that number, including tapbacks. The `guess` is only a hint; Claude makes the
@@ -61,7 +61,7 @@ def guess(texts: list[str], tapbacks_on_sent: list[int] = ()) -> str:
     return "unclear"
 
 
-def check_interview_replies(con: sqlite3.Connection, log: SendLog, allow: Allowlist, send_ids: list) -> list[dict]:
+def check_replies(con: sqlite3.Connection, log: SendLog, allow: Allowlist, send_ids: list) -> list[dict]:
     results = []
     for send_id in send_ids:
         record = log.get(str(send_id))

@@ -20,7 +20,7 @@ def con(synth_db):
 
 
 def check(con, log, allow, key):
-    return replies.check_interview_replies(con, log, allow, [f"synth-{key}"])[0]
+    return replies.check_replies(con, log, allow, [f"synth-{key}"])[0]
 
 
 @pytest.mark.parametrize(
@@ -52,7 +52,7 @@ def test_stops_at_the_next_logged_send(con, log, allow):
     r = check(con, log, allow, "yes")
     assert [x["text"] for x in r["replies"]] == ["Yes, that works!"]
     assert "window_end" in r
-    second = replies.check_interview_replies(con, log, allow, ["synth-yes-reminder"])[0]
+    second = replies.check_replies(con, log, allow, ["synth-yes-reminder"])[0]
     assert [x["text"] for x in second["replies"]] == ["See you then"]
 
 
@@ -69,13 +69,13 @@ def test_guid_recovered_from_after_rowid(con, tmp_path, allow):
     rowid = con.execute("SELECT ROWID FROM message WHERE guid = ?", (rec["guid"],)).fetchone()[0]
     log = SendLog(tmp_path / "s.jsonl")
     log.append(rec | {"guid": None, "status": "unknown", "after_rowid": rowid - 1})
-    r = replies.check_interview_replies(con, log, allow, ["synth-tapback"])[0]
+    r = replies.check_replies(con, log, allow, ["synth-tapback"])[0]
     assert r["guess"] == "yes" and r["replies"][0]["on_sent_message"] is True
 
 
 def test_unknown_send_id_and_allowlist(con, log, tmp_path):
     allow = contacts.load(tmp_path / "missing.csv")
-    res = replies.check_interview_replies(con, log, allow, ["nope", "synth-yes"])
+    res = replies.check_replies(con, log, allow, ["nope", "synth-yes"])
     assert "Unknown send_id" in res[0]["error"]
     assert "not in contacts.csv" in res[1]["error"]
 
@@ -85,7 +85,7 @@ def test_dry_run_send_is_labeled(con, tmp_path, allow):
     log.append({"send_id": "d1", "timestamp": "2026-11-08T10:00:00-07:00", "name": "Mark Nelson",
                 "phone": "+18015550131", "text": "hi", "service": "iMessage", "dry_run": True, "sent": False,
                 "guid": None, "status": None, "error": None})
-    r = replies.check_interview_replies(con, log, allow, ["d1"])[0]
+    r = replies.check_replies(con, log, allow, ["d1"])[0]
     assert r["dry_run"] is True and "DRY RUN" in r["note"]
 
 

@@ -1,3 +1,4 @@
+import dataclasses
 from datetime import datetime, timedelta
 
 import pytest
@@ -81,6 +82,8 @@ def test_quiet_hours(env):
     r = preview(env, MSGS, now=NIGHT_THU, allow_quiet_hours=True)
     assert r["ok"] and r["rows"][0]["warnings"] == ["QUIET HOURS"]
     sunday = datetime(2026, 11, 15, 12, 0).astimezone()
+    assert preview(env, MSGS, now=sunday)["ok"]  # personal profile: Sundays are fine
+    env["cfg"] = dataclasses.replace(env["cfg"], block_sunday=True)  # ward profile default
     assert "Sunday" in preview(env, MSGS, now=sunday)["failed_rows"][0]["reason"]
 
 

@@ -101,6 +101,8 @@ def connect(path: Path | str) -> Iterator[sqlite3.Connection]:
     con.row_factory = sqlite3.Row
     try:
         yield con
+    except sqlite3.Error as e:  # e.g. "database is locked" while Messages writes: never a raw sqlite3 error
+        raise ChatDBError(f"Couldn't read {path}: {e}") from None
     finally:
         con.close()
 
