@@ -153,12 +153,18 @@ pointed at `contacts.example.csv` or a `chat.db` under `demo/`.
 
 ```
 /text Liz "Running 5 min late"
+/text Liz --late "Still up?"
 ```
 
 Looks the name up in `contacts.csv` (a first name is fine if only one row matches), sends the words exactly
 as written, and goes straight from the preview to `confirm_send`. You still get the permission prompt and the
-Send dialog. It stops instead of guessing if the name doesn't match exactly one contact, and it never
-overrides quiet hours or the repeat guard unless you say so. The command is in
+Send dialog. It stops instead of guessing if the name doesn't match exactly one contact.
+
+- `--late` sends during quiet hours (it passes `allow_quiet_hours`, and the dialog says QUIET HOURS). Without
+  it, a quiet-hours send is refused with a one-line hint to add `--late`.
+- It never overrides the repeat guard unless you ask.
+- It runs on Haiku (`model:` in the command file) to cut the wait between steps. Your two clicks are still
+  the gates. The command is in
 [.claude/commands/text.md](.claude/commands/text.md).
 
 A failed iMessage is **not** resent as SMS automatically, because that risks a double text. Claude can offer a

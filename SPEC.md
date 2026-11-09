@@ -97,9 +97,10 @@ task needs it.
 - **Project permissions** (`.claude/settings.json`): `preview_send`, `get_replies` and `check_replies` are
   allow-listed (they can't send), and `confirm_send` is on the **ask** list for both `imessage` and
   `imessage-demo`.
-- **`/text <name> "<message>"`** (`.claude/commands/text.md`): looks the name up in `contacts.csv`, sends the
-  words exactly as written, and goes straight from preview to `confirm_send`. It may pre-approve only
-  `Read(./contacts.csv)` and `preview_send`, never `confirm_send`.
+- **`/text <name> [--late] "<message>"`** (`.claude/commands/text.md`): looks the name up in `contacts.csv`,
+  sends the words exactly as written, and goes straight from preview to `confirm_send`. `--late` passes
+  `allow_quiet_hours`. It runs on Haiku. It may pre-approve only `Read(./contacts.csv)` and `preview_send`,
+  never `confirm_send`.
 - **Never put `confirm_send` on Claude Code's allowed-tools list**, and never use an "always allow" for it.
   The README must say this prominently. The native dialog (§7) is the real gate, and the permission prompt
   is a second one.
@@ -485,3 +486,6 @@ The first live send needed four human steps. Two were not gates, so they are gon
 - Claude no longer waits for a chat "yes" between the preview and `confirm_send`: the permission prompt
   (which shows the echoed messages) and the Send dialog are the approval.
 - New `/text <name> "<message>"` command for one exact text to one contact.
+- Timing of the first `/text` run: about 18 s of model turns, about 12 s for Blake's two clicks, and about
+  2 s in the server. So `/text` now runs on Haiku, and `--late` replaces the quiet-hours refuse-and-retry
+  loop (about 20 s).
