@@ -8,6 +8,9 @@ logs/
 # Step 0 throwaway scripts
 spike/
 
+# Synthetic demo output (python -m tests.synthetic demo)
+demo/
+
 # Python
 .venv/
 __pycache__/
