@@ -170,8 +170,10 @@ Tool descriptions must say:
 - **No automatic fallback.** A failed iMessage is **not** resent as SMS automatically, because that risks a double
   text. The row reports `failed`, and Claude can offer Blake a new `preview_send` with `service="SMS"`.
   SMS uses `1st account whose service type = SMS` and needs iPhone Text Message Forwarding.
-- **Delivery check:** after each send, poll `chat.db` for up to 15 seconds for the new outgoing row to that
-  handle (`is_from_me = 1`, date ≥ send start, matching text). Record its `guid`, then report:
+- **Delivery check:** just before each send, record the current `MAX(message.ROWID)`. After the send, poll
+  `chat.db` for up to 15 seconds for an outgoing row to that handle (`is_from_me = 1`) with a ROWID greater
+  than that value. Don't match on `message.text`: step 0 showed it is NULL even for messages we send (the
+  text lives in `attributedBody`). Record the row's `guid`, then report:
   - `delivered`: `is_delivered = 1`
   - `sent`: `is_sent = 1`, not yet delivered
   - `failed`: `error != 0`
@@ -183,7 +185,7 @@ Tool descriptions must say:
   newer macOS) are shown as `👍 Liked "…"` etc., and are linked to the message they react to via
   `associated_message_guid`. In `check_interview_replies`, a love or like on the sent message is a `yes` guess,
   a dislike is a `no` guess, and the others are `unclear`. Removed reactions (3000–3006) cancel the matching
-  reaction. Step 0 confirms these codes against Blake's real `chat.db`.
+  reaction. The step 10 real-send test confirms these codes against Blake's real `chat.db`.
 - **Keyword guess:** `opt_out` (stop, unsubscribe, "don't text", "please stop") wins over everything,
   then `reschedule` (instead, another time, can't make, a different time or day), then `yes` / `no`.
   Anything else is `unclear`.
@@ -235,7 +237,8 @@ No live class demo. The goal is a server Blake actually uses for ward texting, t
   members → batch preview → dialog → confirm → `check_interview_replies`.
 - **Real send to someone else:** a spouse or friend, not Blake's own number. In a chat with yourself, both
   sides are `is_from_me`, so a self-send never exercises the reply path. Add them to `contacts.csv`, send
-  live, have them reply "yes" and also 👍, and check that `check_interview_replies` catches both.
+  live, have them reply "yes" and also 👍, and check that `check_interview_replies` catches both. Note the
+  tapback's real `associated_message_type` and confirm it matches §9.
 - **First real ward use:** one interview request Blake would have sent by hand anyway.
 - MCP Inspector is optional; the Claude Code dry-run covers the same ground.
 
@@ -278,6 +281,17 @@ imessage-mcp/
      `error` / `is_sent` / `is_delivered` and decoded text through the copied decoder.
 
    If any of these fails, revise this spec before continuing.
+
+   **Done 2026-11-08, all three passed:**
+   - (a) The argv send worked over iMessage (exit 0).
+   - (b) The dialog appeared from a child process and returned the clicked button.
+   - (c) After Full Disk Access was granted to the Claude desktop app, the sent row appeared right away with
+     `error=0`, `is_sent=1`, `is_delivered=1`. `message.text` was NULL, so the delivery check matches by
+     ROWID (§9) and attributedBody decoding is required for sent messages too.
+
+   **Still to confirm:**
+   - The copied decoder on a real sent row (build step 5, against the real DB).
+   - The tapback codes, from the step 10 real-send test.
 1. `pyproject.toml`, `.venv`, `.gitignore` (`contacts.csv`, `logs/`, `*.db`, `.venv`, `spike/`).
 2. Copy `attributed_body.py` + its tests and the synthetic DB generator from `imessage-search-project`,
    and get those tests passing here.
