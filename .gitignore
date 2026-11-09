@@ -5,6 +5,9 @@ logs/
 *.db-wal
 *.db-shm
 
+# Step 0 throwaway scripts
+spike/
+
 # Python
 .venv/
 __pycache__/
