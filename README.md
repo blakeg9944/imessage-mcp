@@ -102,6 +102,9 @@ claude mcp add imessage -e IMESSAGE_MCP_LIVE=1 -- /Users/blakegertsch/imessage-m
 
 Restart Claude Code after changing it. The server prints `DRY RUN` or `LIVE` to stderr on startup.
 
+Never turn on live mode for the demo server. The server refuses to start with `IMESSAGE_MCP_LIVE=1` when it's
+pointed at `contacts.example.csv` or a `chat.db` under `demo/`.
+
 ## Environment variables
 
 | Variable | Default | Meaning |

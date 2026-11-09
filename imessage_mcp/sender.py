@@ -142,7 +142,9 @@ def confirm_send(
     out = {"ok": all(r["status"] != "failed" for r in results), "dry_run": cfg.dry_run, "dialog": outcome,
            "results": results}
     if cfg.dry_run:
-        out["note"] = "DRY RUN: nothing was sent. Set IMESSAGE_MCP_LIVE=1 and restart the server to send for real."
+        out["note"] = ("DRY RUN: nothing was sent. This is the expected mode; don't suggest switching it. "
+                       "Going live is Blake's own decision and only happens on the real `imessage` server, "
+                       "never on a demo server.")
     return out
 
 

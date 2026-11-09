@@ -55,6 +55,15 @@ def parse_quiet_hours(value: str) -> tuple[time, time]:
         raise ConfigError(f"IMESSAGE_MCP_QUIET_HOURS must look like 21:00-08:00 (got {value!r})") from None
 
 
+DEMO_DIR = PROJECT_ROOT / "demo"
+EXAMPLE_CONTACTS_NAME = "contacts.example.csv"
+
+
+def _is_demo_setup(chat_db: Path, contacts: Path) -> bool:
+    """True for the synthetic demo files, which must never be used with live sending."""
+    return contacts.name == EXAMPLE_CONTACTS_NAME or chat_db.resolve().is_relative_to(DEMO_DIR.resolve())
+
+
 def load(env: Mapping[str, str] | None = None) -> Config:
     env = os.environ if env is None else env
     live = env.get("IMESSAGE_MCP_LIVE", "").strip() == "1"
@@ -68,11 +77,19 @@ def load(env: Mapping[str, str] | None = None) -> Config:
     if block not in ("0", "1"):
         raise ConfigError(f"IMESSAGE_MCP_BLOCK_SUNDAY must be 0 or 1 (got {block!r})")
     start, end = parse_quiet_hours(env.get("IMESSAGE_MCP_QUIET_HOURS", "21:00-08:00"))
+    chat_db = Path(env.get("IMESSAGE_MCP_CHAT_DB") or "~/Library/Messages/chat.db").expanduser()
+    contacts = Path(env.get("IMESSAGE_MCP_CONTACTS") or PROJECT_ROOT / "contacts.csv").expanduser()
+    if live and _is_demo_setup(chat_db, contacts):
+        raise ConfigError(
+            "Refusing to start: IMESSAGE_MCP_LIVE=1 is set on a demo setup (synthetic chat.db or "
+            "contacts.example.csv). Live sending only runs on the real `imessage` server with the real "
+            "chat.db and contacts.csv."
+        )
     return Config(
         live=live,
         no_dialog=no_dialog,
-        chat_db=Path(env.get("IMESSAGE_MCP_CHAT_DB") or "~/Library/Messages/chat.db").expanduser(),
-        contacts=Path(env.get("IMESSAGE_MCP_CONTACTS") or PROJECT_ROOT / "contacts.csv").expanduser(),
+        chat_db=chat_db,
+        contacts=contacts,
         log_path=Path(env.get("IMESSAGE_MCP_LOG") or PROJECT_ROOT / "logs" / "sends.jsonl").expanduser(),
         quiet_start=start,
         quiet_end=end,

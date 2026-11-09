@@ -24,6 +24,23 @@ def test_live():
     assert config.load({"IMESSAGE_MCP_LIVE": "1"}).live
 
 
+@pytest.mark.parametrize("env", [
+    {"IMESSAGE_MCP_CONTACTS": str(config.PROJECT_ROOT / "contacts.example.csv")},
+    {"IMESSAGE_MCP_CONTACTS": "/elsewhere/contacts.example.csv"},
+    {"IMESSAGE_MCP_CHAT_DB": str(config.PROJECT_ROOT / "demo" / "chat.db")},
+])
+def test_live_refused_on_demo_setup(env):
+    with pytest.raises(ConfigError, match="demo setup"):
+        config.load({"IMESSAGE_MCP_LIVE": "1", **env})
+    assert config.load(env).dry_run  # the same demo setup is fine in dry-run
+
+
+def test_live_allowed_on_other_paths(tmp_path):
+    cfg = config.load({"IMESSAGE_MCP_LIVE": "1", "IMESSAGE_MCP_CHAT_DB": str(tmp_path / "chat.db"),
+                       "IMESSAGE_MCP_CONTACTS": str(tmp_path / "contacts.csv")})
+    assert cfg.live
+
+
 def test_no_dialog_refused_when_live():
     with pytest.raises(ConfigError, match="Refusing to start"):
         config.load({"IMESSAGE_MCP_LIVE": "1", "IMESSAGE_MCP_NO_DIALOG": "1"})
